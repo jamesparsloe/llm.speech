@@ -6,7 +6,7 @@ Trying to join LLMs and speech models in a multi-task way. Inspired by GPT-4o an
 
 I think most of the following need to be ticked off on the route to a full multi-modal model:
 
-- [x] Text-to-speech direction works in principle (although not very high quality at the moment and some issues that hopefully will get resolved with some iteration or scaling)
+- [x] Text-to-speech direction works in principle - although not very high quality at the moment and some issues that hopefully will get resolved with some iteration or scaling - see the `examples` directory for what the current model can (and can't) do.
 - [ ] Warm starting text-to-speech training from a pretrained text LLM (will have to be a small one to fit on my 4090 dev box)
 - [ ] Text-to-speech finetuning on more expressive and higher quality datasets ([Expresso](https://github.com/facebookresearch/textlesslib/tree/main/examples/expresso/dataset)?)
 - [ ] Speech-to-text direction

@@ -1,0 +1,4 @@
+micro_batch_size: 4
+d_model: 1024
+n_heads: 16
+n_layer: 24

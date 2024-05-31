@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llmspeech"
+description = ""
+dynamic = ["version"]
+
+requires-python = ">=3.10"
+
+dependencies = [
+    "click",
+    "datasets",
+    "einops",
+    "gradio",
+    "huggingface_hub[hf_transfer]",
+    "matplotlib",
+    "numpy",
+    "pydantic",
+    "rotary-embedding-torch",
+    "snac",
+    "torch",
+    "torchaudio",
+    "wandb",
+]
+
+[project.optional-dependencies]
+dev = ["ipykernel", "pre-commit", "ruff"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+version = { attr = "llmspeech.__version__" }

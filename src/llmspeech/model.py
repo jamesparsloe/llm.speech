@@ -3,12 +3,82 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from einops import rearrange
+from einops import rearrange, repeat
 from huggingface_hub import hf_hub_download
 from rotary_embedding_torch import RotaryEmbedding
 from torch import Tensor
+from dataclasses import dataclass, field
+from torch.cuda.amp import autocast
 
 from .config import Config
+
+
+class KVCache(nn.Module):
+    def __init__(
+        self, max_batch_size, max_seqlen, n_heads, head_dim, dtype=torch.bfloat16
+    ):
+        super().__init__()
+        cache_shape = (max_batch_size, n_heads, max_seqlen, head_dim)
+        self.register_buffer("k_cache", torch.zeros(cache_shape, dtype=dtype))
+        self.register_buffer("v_cache", torch.zeros(cache_shape, dtype=dtype))
+
+    def update(self, input_pos: Tensor, k_val: Tensor, v_val: Tensor):
+        # input_pos: [S], k_val: [B, H, S, D]
+        assert input_pos.shape[0] == k_val.shape[2]
+
+        k_out = self.k_cache
+        v_out = self.v_cache
+        k_out[:, :, input_pos] = k_val
+        v_out[:, :, input_pos] = v_val
+
+        return k_out, v_out
+
+
+# copied out of lucidrains' rotary_embedding_torch for hackability
+def rotate_half(x):
+    x = rearrange(x, "... (d r) -> ... d r", r=2)
+    x1, x2 = x.unbind(dim=-1)
+    x = torch.stack((-x2, x1), dim=-1)
+    return rearrange(x, "... d r -> ... (d r)")
+
+
+@autocast(enabled=False)
+def apply_rotary_emb(
+    freqs: Tensor, t: Tensor, start_index: int = 0, scale=1.0, seq_dim=-2
+):
+    dtype = t.dtype
+    # assert t.size(seq_dim) <= freqs.size(0), f"{t.size()=} {freqs.size()=}"
+
+    if t.ndim == 3:
+        seq_len = t.shape[seq_dim]
+        freqs = freqs[-seq_len:]
+
+    rot_dim = freqs.shape[-1]
+    end_index = start_index + rot_dim
+
+    assert (
+        rot_dim <= t.shape[-1]
+    ), f"feature dimension {t.shape[-1]} is not of sufficient size to rotate in all the positions {rot_dim}"
+
+    t_left, t, t_right = (
+        t[..., :start_index],
+        t[..., start_index:end_index],
+        t[..., end_index:],
+    )
+    t = (t * freqs.cos() * scale) + (rotate_half(t) * freqs.sin() * scale)
+    out = torch.cat((t_left, t, t_right), dim=-1)
+
+    return out.type(dtype)
+
+
+def precompute_freqs_cis(dim: int, max_seqlen: int, theta=10000, dtype=torch.float32):
+    t = torch.arange(max_seqlen, dtype=dtype)
+    freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
+
+    freqs = torch.einsum("..., f -> ... f", t.type(freqs.dtype), freqs)
+    freqs = repeat(freqs, "... n -> ... (n r)", r=2)
+
+    return freqs
 
 
 class MHA(nn.Module):
@@ -17,65 +87,62 @@ class MHA(nn.Module):
         dim: int,
         n_heads: int,
         *,
+        block_idx: int,
         bias: bool = False,
         dropout: float = 0.0,
         causal: bool = False,
-        use_rotary_emb: bool = False,
-        rotary_dim: int = 32,
     ):
         super().__init__()
+        self.block_idx = block_idx
         self.dim = dim
         self.n_heads = n_heads
+        self.head_dim = dim // n_heads
         self.dropout = dropout
         self.causal = causal
-        self.use_rotary_emb = use_rotary_emb
-
         self.Wqkv = nn.Linear(dim, 3 * dim, bias=bias)
 
         self.out_proj = nn.Linear(dim, dim, bias=bias)
 
-        if self.use_rotary_emb:
-            self.rotary_emb = RotaryEmbedding(dim=rotary_dim)
+        self.kv_cache = None
 
     def forward(
         self,
         x: Tensor,
-        x_kv: Tensor | None = None,
-        need_weights: bool = False,
-        offset: int = 0,
+        freqs_cis: Tensor,
+        input_pos: Tensor | None = None,
         attn_mask: Tensor | None = None,
     ):
         B, T, d = x.size()
         dtype = x.dtype
 
+        dropout_p = self.dropout if self.training else 0.0
+
         qkv = self.Wqkv(x)
         qkv = rearrange(
             qkv, "B T (three h d) -> B three h T d", three=3, h=self.n_heads
         )
-        q, k, v = qkv.unbind(dim=1)
+        q, k, v = qkv.unbind(dim=1)  # (B, h, T, d)
 
-        if self.use_rotary_emb:
-            q = self.rotary_emb.rotate_queries_or_keys(q, offset=offset)
-            k = self.rotary_emb.rotate_queries_or_keys(k)
+        q = apply_rotary_emb(freqs_cis, q)
+        k = apply_rotary_emb(freqs_cis, k)
 
-        attn_weights = None
+        if self.kv_cache is not None:
+            k, v = self.kv_cache.update(input_pos, k, v)
 
-        if need_weights:
-            attn_weights = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
-            attn_weights = F.softmax(attn_weights, dim=-1)
-            out = attn_weights @ v
-        else:
-            out = F.scaled_dot_product_attention(
-                q,
-                k,
-                v,
-                dropout_p=self.dropout if self.training else 0.0,
-                is_causal=self.causal,
-            )
+        is_causal = self.causal and self.kv_cache is None
+
+        out = F.scaled_dot_product_attention(
+            q,
+            k,
+            v,
+            dropout_p=dropout_p,
+            is_causal=is_causal,
+            attn_mask=attn_mask,
+        )
 
         out = self.out_proj(rearrange(out, "B h T d -> B T (h d)"))
 
-        return out, attn_weights
+        return out
 
 
 class MLP(nn.Module):
@@ -93,31 +160,42 @@ class MLP(nn.Module):
 class Block(nn.Module):
     def __init__(
         self,
+        *,
         d_model: int,
         n_heads: int,
+        block_idx: int,
         bias: bool,
         dropout: float,
-        use_rotary_emb: bool,
     ):
         super().__init__()
+
+        self.block_idx = block_idx
+        self.n_heads = n_heads
+        self.head_dim = d_model // n_heads
 
         self.attn_norm = nn.LayerNorm(d_model)
         self.attn = MHA(
             d_model,
             n_heads,
+            block_idx=block_idx,
             bias=bias,
             dropout=dropout,
-            use_rotary_emb=use_rotary_emb,
             causal=True,
         )
 
         self.mlp_norm = nn.LayerNorm(d_model)
         self.mlp = MLP(d_model=d_model, bias=bias, dropout=dropout)
 
-    def forward(self, x: Tensor, x_kv: Tensor):
-        attn_out, attn_weights = self.attn(self.attn_norm(x))
-        x = x + attn_out
-
+    def forward(
+        self,
+        x: Tensor,
+        freqs_cis: Tensor,
+        input_pos: Tensor | None = None,
+        attn_mask: Tensor | None = None,
+    ):
+        x = x + self.attn(
+            self.attn_norm(x), freqs_cis, input_pos=input_pos, attn_mask=attn_mask
+        )
         x = x + self.mlp(self.mlp_norm(x))
 
         return x
@@ -131,27 +209,58 @@ class Decoder(nn.Module):
         n_heads: int,
         bias: bool,
         dropout: float,
-        use_rotary_emb: bool = True,
+        rotary_dim: int = 32,  # backwards compat
+        max_seqlen: int = 4096,
     ):
         super().__init__()
+
+        self.max_seqlen = max_seqlen
         self.blocks = nn.ModuleList(
             [
                 Block(
-                    d_model,
-                    n_heads,
+                    d_model=d_model,
+                    n_heads=n_heads,
+                    block_idx=block_idx,
                     bias=bias,
                     dropout=dropout,
-                    use_rotary_emb=use_rotary_emb,
                 )
-                for _ in range(n_layers)
+                for block_idx in range(n_layers)
             ]
         )
         self.norm = nn.LayerNorm(d_model)
 
-    def forward(self, x: Tensor, x_kv: Tensor | None = None):
+        self.attn_mask = None
+
+        freqs_cis = precompute_freqs_cis(rotary_dim, max_seqlen)
+        self.register_buffer("freqs_cis", freqs_cis, persistent=False)
+
+    def allocate_inference_cache(
+        self, batch_size: int, device: str, dtype=torch.bfloat16
+    ):
         for block in self.blocks:
-            x = block(x, x_kv=x_kv)
+            block.attn.kv_cache = KVCache(
+                batch_size, self.max_seqlen, block.n_heads, block.head_dim, dtype
+            ).to(device)
+        self.attn_mask = torch.tril(
+            torch.ones(
+                self.max_seqlen, self.max_seqlen, dtype=torch.bool, device=device
+            )
+        )
+
+    def forward(self, x: Tensor, input_pos: Tensor):
+        freqs_cis = self.freqs_cis[input_pos]
+
+        attn_mask = (
+            self.attn_mask[None, None, input_pos]
+            if self.attn_mask is not None
+            else None
+        )
+
+        for block in self.blocks:
+            x = block(x, freqs_cis, input_pos=input_pos, attn_mask=attn_mask)
+
         x = self.norm(x)
+
         return x
 
 
@@ -180,7 +289,6 @@ class GPT(nn.Module):
             n_heads=config.n_heads,
             bias=config.bias,
             dropout=config.dropout,
-            use_rotary_emb=config.use_rotary_emb,
         )
 
         self.lm_head = nn.Linear(d_model, vocab_size, bias=config.bias)
@@ -220,14 +328,18 @@ class GPT(nn.Module):
         self,
         *,
         input_ids: Tensor,
+        input_pos: Tensor | None = None,
         num_last_tokens: int = 0,
     ):
         B, T = input_ids.size()
         device = input_ids.device
 
+        if input_pos is None:
+            input_pos = torch.arange(T, device=device)
+
         emb = self.emb(input_ids)
 
-        hidden_states = self.decoder(emb)
+        hidden_states = self.decoder(emb, input_pos)
 
         # decoding
         if num_last_tokens > 0:

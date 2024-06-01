@@ -3,18 +3,23 @@ import os
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset
-
+import random
 from llmspeech.audio import flatten, unflatten, unflatten_and_remove_offsets
 from llmspeech.text import detokenize, tokenize
 
-DATASET_DIR = os.path.expanduser("~/.cache/datasets/snac_llm_parler_tts")
-os.makedirs(DATASET_DIR, exist_ok=True)
+MLS_ENG_DATASET_DIR = os.path.expanduser("~/.cache/datasets/snac_llm_parler_tts")
+os.makedirs(MLS_ENG_DATASET_DIR, exist_ok=True)
+
+EXPRESSO_DATASET_DIR = os.path.expanduser("~/.cache/datasets/snac_expresso")
+os.makedirs(EXPRESSO_DATASET_DIR, exist_ok=True)
 
 
 class SNACDataset(Dataset):
     def __init__(
         self,
         root: str,
+        with_style_prompts: bool = False,
+        p_style_prompt: float = 0.5,
         *,
         n_text_tokens: int,
         codebook_size: int,
@@ -24,6 +29,9 @@ class SNACDataset(Dataset):
     ):
         self.root = root
         self.paths = os.listdir(root)
+
+        self.with_style_prompts = with_style_prompts
+        self.p_style_prompt = p_style_prompt
 
         self.n_text_tokens = n_text_tokens
         self.codebook_size = codebook_size
@@ -38,6 +46,12 @@ class SNACDataset(Dataset):
         path = os.path.join(self.root, self.paths[idx])
         item = torch.load(path)
         text = item["text"]
+
+        # NOTE(james) don't have this for every dataset
+        if self.with_style_prompts:
+            if random.random() < self.p_style_prompt:
+                style = item["style"]
+                text = f"[{style}]{text}"
 
         input_ids = tokenize(text)
         input_ids = [self.bos_token_id] + input_ids + [self.boa_token_id]
@@ -76,7 +90,7 @@ if __name__ == "__main__":
     config = Config()
 
     dataset = SNACDataset(
-        DATASET_DIR,
+        MLS_ENG_DATASET_DIR,
         n_text_tokens=config.n_text_tokens,
         codebook_size=config.codebook_size,
         bos_token_id=config.bos_token_id,

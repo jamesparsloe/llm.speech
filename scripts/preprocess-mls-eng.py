@@ -3,7 +3,7 @@ import os
 import torch
 from datasets import load_dataset
 
-from .dataset import DATASET_DIR
+from llmspeech.dataset import MLS_ENG_DATASET_DIR
 
 
 def process(item, index):
@@ -13,14 +13,15 @@ def process(item, index):
     item = {
         "text": text,
         "audio_tokens": audio_tokens,
+        # TODO(james) add some metadata and tags
     }
 
-    path = os.path.join(DATASET_DIR, f"{index}.pt")
+    path = os.path.join(MLS_ENG_DATASET_DIR, f"{index}.pt")
     torch.save(item, path)
 
 
 def main():
-    os.makedirs(DATASET_DIR, exist_ok=True)
+    os.makedirs(MLS_ENG_DATASET_DIR, exist_ok=True)
 
     ds = load_dataset("blanchon/snac_llm_parler_tts")
     num_proc = os.cpu_count()

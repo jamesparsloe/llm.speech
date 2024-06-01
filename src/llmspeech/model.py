@@ -71,7 +71,9 @@ def apply_rotary_emb(
     return out.type(dtype)
 
 
-def precompute_freqs_cis(dim: int, max_seqlen: int, theta=10000, dtype=torch.float32):
+def precompute_freqs_cis(
+    dim: int, max_seqlen: int, theta: float = 10_000.0, dtype=torch.float32
+):
     t = torch.arange(max_seqlen, dtype=dtype)
     freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
 
@@ -211,6 +213,7 @@ class Decoder(nn.Module):
         dropout: float,
         rotary_dim: int = 32,  # backwards compat
         max_seqlen: int = 4096,
+        rope_theta: float = 10000.0,
     ):
         super().__init__()
 
@@ -231,7 +234,7 @@ class Decoder(nn.Module):
 
         self.attn_mask = None
 
-        freqs_cis = precompute_freqs_cis(rotary_dim, max_seqlen)
+        freqs_cis = precompute_freqs_cis(rotary_dim, max_seqlen, theta=rope_theta)
         self.register_buffer("freqs_cis", freqs_cis, persistent=False)
 
     def allocate_inference_cache(
@@ -289,6 +292,8 @@ class GPT(nn.Module):
             n_heads=config.n_heads,
             bias=config.bias,
             dropout=config.dropout,
+            rope_theta=config.rope_theta,
+            max_seqlen=config.max_seqlen,
         )
 
         self.lm_head = nn.Linear(d_model, vocab_size, bias=config.bias)
@@ -310,16 +315,17 @@ class GPT(nn.Module):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
     @staticmethod
-    def from_huggingface(filename: str):
+    def from_huggingface(filename: str, **config_kwargs):
         path = hf_hub_download(repo_id="jamesparsloe/llm.speech", filename=filename)
 
         return GPT.from_pretrained(path)
 
     @staticmethod
-    def from_pretrained(path: str):
+    def from_pretrained(path: str, **config_kwargs):
         checkpoint = torch.load(path, map_location="cpu")
         state_dict = checkpoint["model"]
-        config = Config(**checkpoint["config"])
+        config = {**checkpoint["config"], **config_kwargs}
+        config = Config(**config)
         model = GPT(config)
         _ = model.load_state_dict(state_dict, strict=False)
         return model

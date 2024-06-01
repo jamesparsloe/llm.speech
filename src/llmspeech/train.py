@@ -10,7 +10,7 @@ from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader
 
 import wandb
-from llmspeech.dataset import DATASET_DIR, SNACDataset
+from llmspeech.dataset import MLS_ENG_DATASET_DIR, SNACDataset
 from llmspeech.utils import cycle, warmup_then_cosine_decay
 
 from .config import Config
@@ -53,15 +53,30 @@ def main(config_path: str, edit: bool):
     assert kind == "gpt"
 
     model = GPT(config).to(device)
-
     weight_decay = config.weight_decay
     lr = config.lr
     betas = config.betas
 
+    if config.checkpoint_path is not None:
+        checkpoint = torch.load(config.checkpoint_path)
+        pretrained_step = checkpoint["step"]
+        print(f"Restoring model from step {pretrained_step}")
+        state_dict = {
+            k: v for k, v in checkpoint["model"].items() if "rotary_emb" not in k
+        }
+        model.load_state_dict(state_dict, strict=True)
+
+    # TODO(james) what's the thinking on loading the optimizer nowadays for finetuning?
     optimizer = build_optimizer(model, weight_decay=weight_decay, lr=lr, betas=betas)
 
+    dataset_dir = os.path.join(os.path.expanduser("~/.cache/datasets"), config.dataset)
+    assert os.path.exists(
+        dataset_dir
+    ), f"Please make sure you ran the correct preprocess script for {config.dataset}!"
+
     dataset = SNACDataset(
-        DATASET_DIR,
+        dataset_dir,
+        with_style_prompts=config.with_style_prompts,
         n_text_tokens=config.n_text_tokens,
         codebook_size=config.codebook_size,
         bos_token_id=config.bos_token_id,
@@ -116,6 +131,15 @@ def main(config_path: str, edit: bool):
 
         for microstep in range(gradient_accumulation_steps):
             token_ids = next(dl_iter)
+
+            B, T = token_ids.size()
+
+            # HACK(james) filter this in dataset or a better way!
+            if T > config.max_seqlen:
+                print(
+                    f"Warning! Sequence with length {T} is longer than {config.max_seqlen} - truncating!"
+                )
+                token_ids = token_ids[:, : config.max_seqlen]
 
             token_ids = token_ids.to(device)
             input_ids, target_ids = token_ids[..., :-1], token_ids[..., 1:].contiguous()

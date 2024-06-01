@@ -32,6 +32,15 @@ class Config(BaseModel):
     pad_vocab_size_multiple: int = 8
     dropout: float = 0.0
     use_rotary_emb: bool = True
+    rope_theta: float = 10000.0
+
+    checkpoint_path: str | None = None
+
+    dataset: str = "snac_llm_parler_tts"
+
+    max_seqlen: int = 4096
+
+    with_style_prompts: bool = False
 
     @property
     def grad_accumulation_steps(self):

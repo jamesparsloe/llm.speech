@@ -8,12 +8,20 @@ I think most of the following need to be ticked off on the route to a full multi
 
 - [x] Text-to-speech direction works in principle - although not very high quality at the moment and some issues that hopefully will get resolved with some iteration or scaling - see the `examples` directory for what the current model can (and can't) do.
 - [ ] Warm starting text-to-speech training from a pretrained text LLM (will have to be a small one to fit on my 4090 dev box)
-- [ ] Text-to-speech finetuning on more expressive and higher quality datasets ([Expresso](https://github.com/facebookresearch/textlesslib/tree/main/examples/expresso/dataset)?)
+- [x] Text-to-speech finetuning on more expressive and higher quality datasets ([Expresso](https://github.com/facebookresearch/textlesslib/tree/main/examples/expresso/dataset)?)
 - [ ] Speech-to-text direction
 - [ ] Join text-to-speech and speech-to-text in a multi-task
 - [ ] Interleaving like [SpiRit-LM](https://arxiv.org/abs/2402.05755)
 
 There will probably be some more things to add along the way.
+
+### 2024-05-31
+
+- First training run on the MLS Eng dataset with a small model
+
+### 2024-06-01
+
+- Quick and dirty finetuning from the MLS Eng model on the Expresso dataset for 2000 steps
 
 ## Getting Started
 
@@ -27,16 +35,34 @@ python -m pip install -e .[dev]
 
 Currently just hardcoded for **text-to-speech**
 
+### Datasets
+
 ```sh
-python -m llmspeech.preprocess # downloads and processes the dataset from HuggingFace
-python -m llmspeech.train configs/small.yaml # train the small ~100M model
+python scripts/preprocess-mls-eng.py # downloads and processes the dataset MLS English dataset from HuggingFace
+# wget -nc https://dl.fbaipublicfiles.com/textless_nlp/expresso/data/expresso.tar
+# tar -xf expresso.tar
+```
+
+Train a small ~200M model on the MLS English dataset:
+
+```sh
+python -m llmspeech.train configs/small.yaml
+```
+
+## Demo
+
+A simple demo for TT
+
+```sh
+python app.py
 ```
 
 ## TODO
 
-- [ ] Add kv-caching 😬
+- [x] Add kv-caching 😬
 - [ ] Streaming inference with SNAC decoder
 - [ ] Add DDP - just training on single 4090s currently
+- [ ] `torch.compile` not completely working (CUDA Graphs aren't being used for some reason) I need to take a deeper look
 
 ## Acknowledgements
 

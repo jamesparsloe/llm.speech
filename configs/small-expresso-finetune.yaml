@@ -1,0 +1,8 @@
+dataset: "snac_expresso"
+steps: 2000
+warmup_steps: 200
+checkpoint_every: 200
+lr: 3e-4
+checkpoint_path: gpt-small-055000.pt
+with_style_prompts: true 
+dropout: 0.1

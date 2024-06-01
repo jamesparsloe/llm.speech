@@ -17,19 +17,17 @@ There will probably be some more things to add along the way.
 
 ### 2024-05-31
 
-- First training run on the MLS Eng dataset with a small model. 
+- First training run on the MLS Eng dataset with a small model (slightly cherry picked)
 
-https://github.com/jamesparsloe/llm.speech/assets/13669398/a9e1bcf0-ac81-4cbe-95c4-0f1906c6adbc
+https://github.com/jamesparsloe/llm.speech/assets/13669398/fdae7771-864f-43c3-a5c3-8453e2d0100d
 
 * Slightly cherry picked example.
 
 ### 2024-06-01
 
-- Quick and dirty finetuning from the MLS Eng model on the Expresso dataset for 2000 steps
+- Quick and dirty finetuning from the MLS Eng model on the Expresso dataset for 2000 steps (slightly cherry picked)
 
-https://github.com/jamesparsloe/llm.speech/assets/13669398/fdae7771-864f-43c3-a5c3-8453e2d0100d
-
-* Slightly cherry picked example.
+https://github.com/jamesparsloe/llm.speech/assets/13669398/a9e1bcf0-ac81-4cbe-95c4-0f1906c6adbc
 
 ## Getting Started
 
@@ -71,6 +69,7 @@ python app.py
 - [ ] Streaming inference with SNAC decoder
 - [ ] Add DDP - just training on single 4090s currently
 - [ ] `torch.compile` not completely working (CUDA Graphs aren't being used for some reason) I need to take a deeper look
+- [ ] Add prompting to try and force a specific speaker
 
 ## Acknowledgements
 

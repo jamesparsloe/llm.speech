@@ -17,11 +17,19 @@ There will probably be some more things to add along the way.
 
 ### 2024-05-31
 
-- First training run on the MLS Eng dataset with a small model
+- First training run on the MLS Eng dataset with a small model. 
+
+https://github.com/jamesparsloe/llm.speech/assets/13669398/a9e1bcf0-ac81-4cbe-95c4-0f1906c6adbc
+
+* Slightly cherry picked example.
 
 ### 2024-06-01
 
 - Quick and dirty finetuning from the MLS Eng model on the Expresso dataset for 2000 steps
+
+https://github.com/jamesparsloe/llm.speech/assets/13669398/fdae7771-864f-43c3-a5c3-8453e2d0100d
+
+* Slightly cherry picked example.
 
 ## Getting Started
 

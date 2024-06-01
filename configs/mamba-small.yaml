@@ -1,0 +1,5 @@
+kind: mamba
+
+micro_batch_size: 8
+d_model: 768
+n_layer: 24

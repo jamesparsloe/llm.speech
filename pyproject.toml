@@ -10,12 +10,14 @@ dynamic = ["version"]
 requires-python = ">=3.10"
 
 dependencies = [
+    "causal-conv1d>=1.2.0",
     "click",
     "datasets",
     "einops",
     "gradio",
     "huggingface_hub[hf_transfer]",
     "matplotlib",
+    "mamba-ssm",
     "numpy",
     "pydantic",
     "rotary-embedding-torch",

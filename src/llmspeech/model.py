@@ -9,7 +9,8 @@ from rotary_embedding_torch import RotaryEmbedding
 from torch import Tensor
 from dataclasses import dataclass, field
 from torch.cuda.amp import autocast
-
+from mamba_ssm import MambaLMHeadModel
+from mamba_ssm.models.config_mamba import MambaConfig
 from .config import Config
 
 
@@ -448,3 +449,30 @@ def build_optimizer(module: nn.Module, *, weight_decay: float, lr: float, betas)
     optimizer = torch.optim.AdamW(optim_groups, lr=lr, betas=betas, fused=True)
 
     return optimizer
+
+
+class Mamba(nn.Module):
+    def __init__(self, config: Config):
+        super().__init__()
+        assert config.kind == "mamba"
+        self.config = config
+        mamba_config = MambaConfig(
+            d_model=config.d_model,
+            n_layer=config.n_layer,
+            vocab_size=config.vocab_size,
+        )
+        self.model = MambaLMHeadModel(mamba_config)
+
+    def forward(self, input_ids: Tensor):
+        outputs = self.model(input_ids)
+        return outputs.logits
+
+    @staticmethod
+    def from_pretrained(path: str, **config_kwargs):
+        checkpoint = torch.load(path, map_location="cpu")
+        state_dict = checkpoint["model"]
+        config = {**checkpoint["config"], **config_kwargs}
+        config = Config(**config)
+        model = Mamba(config)
+        _ = model.load_state_dict(state_dict, strict=False)
+        return model

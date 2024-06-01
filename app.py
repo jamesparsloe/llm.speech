@@ -1,5 +1,5 @@
 import gradio as gr
-from llmspeech.model import GPT
+from llmspeech.model import GPT, Mamba
 from llmspeech import generation
 from llmspeech.text import tokenize, detokenize
 from snac import SNAC
@@ -15,8 +15,10 @@ device = "cuda"
 codec = SNAC.from_pretrained("hubertsiuzdak/snac_24khz").eval().to(device)
 
 MODELS = {
-    "small-mls": "gpt-small-055000.pt",
-    "small-expresso-finetune": "gpt-002000.pt",
+    # "small-mls": "gpt-small-055000.pt",
+    # "small-expresso-finetune": "gpt-002000.pt",
+    "gpt": "./gpt-007000.pt",
+    "mamba-small-mls": "./runs/n9mw567s/mamba-007000.pt",
 }
 
 MODEL_CACHE = {}
@@ -37,7 +39,14 @@ def generate(model_name: str, text: str, temperature: float, top_k: int):
 
     if model is None:
         huggingface_name = MODELS[model_name]
-        model = GPT.from_huggingface(huggingface_name).eval().to(device)
+        if huggingface_name.startswith("."):
+            if "mamba" in huggingface_name:
+                model = Mamba.from_pretrained(huggingface_name).eval().to(device)
+            else:
+                model = GPT.from_pretrained(huggingface_name).eval().to(device)
+        else:
+            model = GPT.from_huggingface(huggingface_name).eval().to(device)
+
         MODEL_CACHE[model_name] = model
 
     config = model.config
@@ -46,10 +55,23 @@ def generate(model_name: str, text: str, temperature: float, top_k: int):
 
     input_ids = [config.bos_token_id] + tokenize(text) + [config.boa_token_id]
     input_ids = torch.tensor(input_ids, device=device).unsqueeze(0)
-    with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-        output_ids = generation.generate(
-            model, input_ids, temperature=temperature, top_k=top_k
+
+    clamp = False
+
+    if isinstance(model, Mamba):
+        output_ids = model.model.generate(
+            input_ids=input_ids,
+            max_length=10 * 84,
+            temperature=temperature,
+            top_k=top_k,
+            cg=True,
         )
+        clamp = True
+    else:
+        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+            output_ids = generation.generate(
+                model, input_ids, temperature=temperature, top_k=top_k
+            )
 
     # HACK if decoding failed somehow and we didn't generate a multiple of 7
     step = 7
@@ -62,6 +84,7 @@ def generate(model_name: str, text: str, temperature: float, top_k: int):
         output_ids[0],
         n_text_tokens=config.n_text_tokens,
         codebook_size=config.codebook_size,
+        clamp=clamp,
     )
 
     waveform = codec.decode(codes)

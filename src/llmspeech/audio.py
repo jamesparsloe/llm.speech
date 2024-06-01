@@ -62,7 +62,7 @@ def validate_codes(codes: list[Tensor], codebook_size: int):
 
 
 def unflatten_and_remove_offsets(
-    flattened: Tensor, *, n_text_tokens: int, codebook_size: int
+    flattened: Tensor, *, n_text_tokens: int, codebook_size: int, clamp: bool = False
 ):
     """Remove offsets we used when doing language modeling so that we can then feed into the SNAC decoder."""
     codes = unflatten(flattened)
@@ -73,6 +73,7 @@ def unflatten_and_remove_offsets(
     for level in codes:
         level -= offset
         offset += codebook_size
+        level.clamp_(0, codebook_size - 1) if clamp else level
 
     validate_codes(codes, codebook_size)
 

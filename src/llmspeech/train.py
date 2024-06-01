@@ -9,12 +9,16 @@ import yaml
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader
 
+from torch import Tensor
 import wandb
 from llmspeech.dataset import MLS_ENG_DATASET_DIR, SNACDataset
 from llmspeech.utils import cycle, warmup_then_cosine_decay
 
 from .config import Config
-from .model import GPT, build_optimizer
+from .model import GPT, build_optimizer, Mamba
+import torch.nn as nn
+
+from pydantic import BaseModel
 
 
 def collate(items, pad_token_id: int):
@@ -50,9 +54,9 @@ def main(config_path: str, edit: bool):
 
     kind = config.kind
 
-    assert kind == "gpt"
+    ModelCls = GPT if kind == "gpt" else Mamba
 
-    model = GPT(config).to(device)
+    model = ModelCls(config).to(device)
     weight_decay = config.weight_decay
     lr = config.lr
     betas = config.betas
